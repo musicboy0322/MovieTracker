@@ -117,6 +117,44 @@ def handle_telegram_update(update: dict):
         elif data.startswith("detail_"):
             movie_id = int(data.split("_")[1])
             cache = user_movie_cache.get(chat_id)
+            target = None
+
+            if cache:
+                target = next((m for m in cache["movies"] if m["id"] == movie_id), None)
+
+            if not target:
+                rows = db.get_user_tracked_movies(chat_id)
+                for row in rows:
+                    if row["movie_id"] == movie_id:
+                        target = {
+                            "id": row["movie_id"],
+                            "title": row["title"],
+                            "release_date": row["release_date"],
+                            "genres": row["genres"].split(", "),
+                            "poster": row["poster"]
+                        }
+                        break
+
+            if not target:
+                send_message(chat_id, "⚠️ Movie not found.")
+                return
+
+            g = ", ".join(target["genres"]) if target.get("genres") else "N/A"
+            caption = (
+                f"🎬 <b>{target['title']}</b>\n"
+                f"📅 {target['release_date']}\n"
+                f"🎭 {g}\n"
+            )
+
+            if target.get("poster"):
+                send_photo(chat_id, target["poster"], caption)
+            else:
+                send_message(chat_id, caption)
+            return
+
+        elif data.startswith("add_"):
+            movie_id = int(data.split("_")[1])
+            cache = user_movie_cache.get(chat_id)
             if not cache:
                 send_message(chat_id, "⚠️ Please search movies first (/upcoming or /upcoming_genre)")
                 return
@@ -127,17 +165,28 @@ def handle_telegram_update(update: dict):
                 send_message(chat_id, "⚠️ Movie not found in current list.")
                 return
 
-            g = ", ".join(target["genres"]) if target.get("genres") else "N/A"
-            caption = (
-                f"🎬 <b>{target['title']}</b>\n"
-                f"📅 {target['release_date']}\n"
-                f"🎭 {g}\n\n"
-            )
+            try:
+                g = ", ".join(target["genres"]) if target.get("genres") else "N/A"
+                db.add_tracked_movie(
+                    chat_id=chat_id,
+                    movie_id=target["id"],
+                    title=target["title"],
+                    release_date=target.get("release_date", ""),
+                    genres=g,
+                    poster=target.get("poster", "")
+                )
+                send_message(chat_id, f"✅ {target['title']} has been added to your watchlist!")
+            except Exception as e:
+                send_message(chat_id, f"❌ Failed to add movie: {e}")
+            return
 
-            if target.get("poster"):
-                send_photo(chat_id, target["poster"], caption)
-            else:
-                send_message(chat_id, caption)
+        elif data.startswith("remove_"):
+            movie_id = int(data.split("_")[1])
+            try:
+                db.remove_tracked_movie(chat_id, movie_id)
+                send_message(chat_id, "🗑️ The movie has been removed from your watchlist.")
+            except Exception as e:
+                send_message(chat_id, f"❌ Failed to remove movie: {e}")
             return
 
         return 
@@ -201,6 +250,26 @@ def handle_telegram_update(update: dict):
         except Exception as e:
             send_message(chat_id, f"Failure: {e}")
         return
+    
+    elif text.startswith("/watchlist"):
+        tracked = db.get_user_tracked_movies(chat_id)
+        if not tracked:
+            send_message(chat_id, "📭 Your watchlist is empty.")
+            return
+
+        reply = "🎬 Your Watchlist\n\n"
+        inline_keyboard = {"inline_keyboard": []}
+        number = 1
+        for m in tracked:
+            reply += f"{number}.\n 🎞️ {m['title']} ({m['release_date']})\n"
+            inline_keyboard["inline_keyboard"].append([
+                {"text": f'''❌ Remove {number}''', "callback_data": f"remove_{m['movie_id']}"},
+                {"text": "🔍 More Detail", "callback_data": f"detail_{m['movie_id']}"}
+            ])
+            reply += "\n"
+            number += 1
+        send_message(chat_id, reply, inline_keyboard)
+        return
 
     else:
         send_message(chat_id, "Sorry, I don’t recognize that command. Try /help to see what I can do!")
@@ -211,6 +280,7 @@ def set_bot_commands():
         {"command": "help", "description": "display all the commands"},
         {"command": "upcoming", "description": "search upcoming movie"},
         {"command": "upcoming_genre", "description": "search upcoming movie by genre"},
+        {"command": "watchlist", "description": "show all your upcoming movie tracking"},
         {"command": "about", "description": "the detailed information of the developer"},
     ]
     r = requests.post(f"{BASE_URL}/setMyCommands", json={"commands": commands})
