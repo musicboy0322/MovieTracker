@@ -2,6 +2,7 @@
 import os
 
 import requests
+from datetime import datetime
 
 from services.tmdb_service import get_upcoming, get_upcoming_by_genre, GENRE_DICT
 from utils.tmdb_util import find_genre
@@ -256,21 +257,39 @@ def handle_telegram_update(update: dict):
         if not tracked:
             send_message(chat_id, "📭 Your watchlist is empty.")
             return
-
         reply = "🎬 Your Watchlist\n\n"
         inline_keyboard = {"inline_keyboard": []}
         number = 1
+        today = datetime.now().date()
         for m in tracked:
-            reply += f"{number}.\n 🎞️ {m['title']} ({m['release_date']})\n"
+            release_date_str = m["release_date"]
+            if release_date_str:
+                try:
+                    release_date = datetime.strptime(release_date_str, "%Y-%m-%d").date()
+                    days_left = (release_date - today).days
+                    if days_left > 0:
+                        countdown_text = f"⏳ {days_left} day{'s' if days_left > 1 else ''} left"
+                    elif days_left == 0:
+                        countdown_text = "🎬 Releases today!"
+                    else:
+                        countdown_text = "✅ Already released"
+                except Exception:
+                    countdown_text = "❔ Unknown date"
+            else:
+                countdown_text = "❔ No release date"
+            reply += (
+                f"{number}.\n"
+                f"🎞️ {m['title']}\n"
+                f"📅 {m['release_date']} — {countdown_text}\n\n"
+            )
             inline_keyboard["inline_keyboard"].append([
-                {"text": f'''❌ Remove {number}''', "callback_data": f"remove_{m['movie_id']}"},
+                {"text": f"❌ Remove {number}", "callback_data": f"remove_{m['movie_id']}"},
                 {"text": "🔍 More Detail", "callback_data": f"detail_{m['movie_id']}"}
             ])
-            reply += "\n"
             number += 1
         send_message(chat_id, reply, inline_keyboard)
         return
-
+        
     else:
         send_message(chat_id, "Sorry, I don’t recognize that command. Try /help to see what I can do!")
 
