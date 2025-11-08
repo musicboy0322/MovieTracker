@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 # load env file
 load_dotenv()
 
+from services.scheduler import start_scheduler
 from services.telegram_service import handle_telegram_update, set_bot_commands
 from services.tmdb_service import check_validation
 
@@ -33,3 +34,7 @@ def set_webhook() -> dict:
     set_bot_commands()
     r = requests.post(f'''{BASE_URL}/setWebhook''', json={"url": f'''{WEBHOOK_URL}/webhook'''})
     return r.json()
+
+@app.on_event("startup")
+def on_startup():
+    start_scheduler()
